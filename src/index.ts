@@ -243,4 +243,7 @@ export async function forceFlush(): Promise<void> {
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 export default plugin;
+/** Named export for hosts that resolve named plugin exports (e.g. opencode). */
+export { plugin as otelPlugin };
+export { plugin as OtelPlugin };
 export type { OtelPluginOptions } from "./types.js";

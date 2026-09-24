@@ -60,10 +60,18 @@ export async function createMetricsSetup(config: RequiredConfig, sharedResource?
 
     const exporter = await createMetricsExporter(config);
 
+    // PeriodicExportingMetricReader requires exportIntervalMillis >= exportTimeoutMillis.
+    // Batch timeout (30s default) is for traces/logs; metrics must clamp to the interval.
+    const exportIntervalMillis = Math.max(1, config.batch.scheduledDelayMillis ?? 5000);
+    const exportTimeoutMillis = Math.min(
+      Math.max(1, config.batch.exportTimeoutMillis ?? exportIntervalMillis),
+      exportIntervalMillis,
+    );
+
     const metricReader = new PeriodicExportingMetricReader({
       exporter,
-      exportIntervalMillis: config.batch.scheduledDelayMillis,
-      exportTimeoutMillis: config.batch.exportTimeoutMillis,
+      exportIntervalMillis,
+      exportTimeoutMillis,
     });
 
     const meterProvider = new MeterProvider({

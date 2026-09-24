@@ -5,9 +5,10 @@
  * All spans in a conversation are either all sampled or all dropped.
  */
 
-import { trace, SpanKind, ROOT_CONTEXT, context } from "@opentelemetry/api";
+import { trace, SpanKind, ROOT_CONTEXT } from "@opentelemetry/api";
 import * as api from "@opentelemetry/api";
 import type { ConversationSampler } from "../types.js";
+import { getBaggage } from "./baggage.js";
 
 // ─── Conversation-Aware Sampler ────────────────────────────────────────────────
 
@@ -79,36 +80,48 @@ export class ConversationAwareSampler implements ConversationSampler {
     attributes: api.Attributes,
     links: ReadonlyArray<{ context: api.Context; attributes?: api.Attributes }>
   ): string | undefined {
-    // 1. Check baggage in context
-    const baggage = context.getValue(ctx, 'baggage') as Record<string, string> | undefined;
-    if (baggage?.['gen_ai.conversation.id']) {
-      return baggage['gen_ai.conversation.id'];
+    // 1. Baggage on this context (safe — real Context has no ContextAPI.getValue)
+    try {
+      const baggage = getBaggage(ctx);
+      if (baggage?.["gen_ai.conversation.id"]) {
+        return baggage["gen_ai.conversation.id"];
+      }
+    } catch {
+      // ignore — fall through to attributes
     }
 
-    // 2. Check span attributes
-    if (attributes['gen_ai.conversation.id']) {
-      return String(attributes['gen_ai.conversation.id']);
+    // 2. Span attributes
+    if (attributes?.["gen_ai.conversation.id"]) {
+      return String(attributes["gen_ai.conversation.id"]);
     }
 
     // 3. Check parent context via links
-    for (const link of links) {
-      const linkBaggage = context.getValue(link.context, 'baggage') as Record<string, string> | undefined;
-      if (linkBaggage?.['gen_ai.conversation.id']) {
-        return linkBaggage['gen_ai.conversation.id'];
+    for (const link of links ?? []) {
+      try {
+        const linkBaggage = getBaggage(link.context);
+        if (linkBaggage?.["gen_ai.conversation.id"]) {
+          return linkBaggage["gen_ai.conversation.id"];
+        }
+      } catch {
+        // ignore
       }
-      if (link.attributes?.['gen_ai.conversation.id']) {
-        return String(link.attributes['gen_ai.conversation.id']);
+      if (link.attributes?.["gen_ai.conversation.id"]) {
+        return String(link.attributes["gen_ai.conversation.id"]);
       }
     }
 
-    // 4. Check parent span context
-    const parentSpan = trace.getSpan(ctx);
-    if (parentSpan) {
-      const parentContext = trace.setSpan(ROOT_CONTEXT, parentSpan);
-      const parentBaggage = context.getValue(parentContext, 'baggage') as Record<string, string> | undefined;
-      if (parentBaggage?.['gen_ai.conversation.id']) {
-        return parentBaggage['gen_ai.conversation.id'];
+    // 4. Check parent span context baggage
+    try {
+      const parentSpan = trace.getSpan(ctx);
+      if (parentSpan) {
+        const parentContext = trace.setSpan(ROOT_CONTEXT, parentSpan);
+        const parentBaggage = getBaggage(parentContext);
+        if (parentBaggage?.["gen_ai.conversation.id"]) {
+          return parentBaggage["gen_ai.conversation.id"];
+        }
       }
+    } catch {
+      // ignore
     }
 
     return undefined;

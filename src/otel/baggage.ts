@@ -135,17 +135,68 @@ export function parseTraceParent(header: string): TypesSpanContext | null {
 // ─── Context Helpers ───────────────────────────────────────────────────────────
 
 /**
+ * Symbol key for baggage on a real OTel Context instance.
+ * Ambient typings incorrectly exposed context.getValue/setValue on the ContextAPI.
+ */
+export const BAGGAGE_CONTEXT_KEY = Symbol.for("opencode-otel.baggage");
+
+/**
+ * Safely read a value from an OTel Context instance.
+ * Real Context API only has instance methods: getValue(key: symbol).
+ */
+export function ctxGetValue(ctx: unknown, key: symbol): unknown {
+  if (ctx && typeof (ctx as { getValue?: unknown }).getValue === "function") {
+    try {
+      return (ctx as { getValue(k: symbol): unknown }).getValue(key);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Safely set a value on an OTel Context instance.
+ */
+export function ctxSetValue(ctx: unknown, key: symbol, value: unknown): Context {
+  if (ctx && typeof (ctx as { setValue?: unknown }).setValue === "function") {
+    try {
+      return (ctx as { setValue(k: symbol, v: unknown): Context }).setValue(key, value);
+    } catch {
+      return ctx as Context;
+    }
+  }
+  return ctx as Context;
+}
+
+/**
  * Get baggage from context
  */
 export function getBaggage(ctx: Context): Record<string, string> | undefined {
-  return context.getValue(ctx, 'baggage') as Record<string, string> | undefined;
+  const raw = ctxGetValue(ctx, BAGGAGE_CONTEXT_KEY);
+  if (!raw || typeof raw !== "object") return undefined;
+
+  // Official Baggage object (getAllEntries)
+  const bag = raw as {
+    getAllEntries?: () => IterableIterator<[string, { value: string }]>;
+  };
+  if (typeof bag.getAllEntries === "function") {
+    const out: Record<string, string> = {};
+    for (const [k, entry] of bag.getAllEntries()) {
+      out[k] = entry?.value;
+    }
+    return out;
+  }
+
+  // Plain record (our propagator)
+  return raw as Record<string, string>;
 }
 
 /**
  * Set baggage in context
  */
 export function setBaggage(ctx: Context, baggage: Record<string, string>): Context {
-  return context.setValue(ctx, 'baggage', baggage);
+  return ctxSetValue(ctx, BAGGAGE_CONTEXT_KEY, baggage);
 }
 
 /**

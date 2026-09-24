@@ -5,7 +5,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { GenAIMetrics, METRIC_NAMES } from "../../dist/otel/metrics.js";
+import { GenAIMetrics, METRIC_NAMES, createMetricsSetup } from "../../dist/otel/metrics.js";
+import { mergeConfig } from "../../dist/config.js";
 
 // ─── Mock Meter ───────────────────────────────────────────────────────────────
 
@@ -206,6 +207,20 @@ describe("Metrics Module", () => {
         "myapp.session.count",
         expect.any(Object)
       );
+    });
+  });
+
+  describe("createMetricsSetup", () => {
+    it("succeeds with default batch config (interval >= timeout)", async () => {
+      // Regression: PeriodicExportingMetricReader requires exportIntervalMillis >= exportTimeoutMillis.
+      // Defaults are scheduledDelay=5000 / exportTimeout=30000 and previously failed setup.
+      const config = mergeConfig({
+        endpoint: "http://127.0.0.1:4318/v1/traces",
+      });
+      const setup = await createMetricsSetup(config);
+      expect(setup).not.toBeNull();
+      expect(typeof setup!.forceFlush).toBe("function");
+      await setup!.shutdown();
     });
   });
 });

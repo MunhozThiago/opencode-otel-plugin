@@ -12,6 +12,7 @@ import type { RequiredConfig } from "../config.js";
 import { generateConversationId, generateAgentId, getConversationContext } from "../utils/ids.js";
 import { createBaseAttributes, addChatAttributes, flattenAttributes } from "../otel/semantic-conventions.js";
 import { enrichSpanAttributes } from "../otel/provider.js";
+import { getBaggage } from "../otel/baggage.js";
 
 // ProviderContext type from opencode SDK (using any to match expected type)
 type ProviderContext = any;
@@ -169,12 +170,15 @@ export async function handleChatHeaders(
   ];
 
   // Merge existing baggage from context if present
-  // @ts-expect-error - context.getValue type inference issue
-  const existingBaggage = context.getValue('baggage') as Map<string, string> | undefined;
-  if (existingBaggage) {
-    existingBaggage.forEach((value: string, key: string) => {
-      baggageEntries.push(`${key}=${encodeURIComponent(value)}`);
-    });
+  try {
+    const existingBaggage = getBaggage(context.active());
+    if (existingBaggage) {
+      for (const [key, value] of Object.entries(existingBaggage)) {
+        baggageEntries.push(`${key}=${encodeURIComponent(value)}`);
+      }
+    }
+  } catch {
+    // ignore — baggage is optional
   }
 
   if (baggageEntries.length > 0) {

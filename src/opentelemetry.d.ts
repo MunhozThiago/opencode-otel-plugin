@@ -20,7 +20,9 @@ declare module '@opentelemetry/api' {
   }
 
   export interface Context {
-    // Context is opaque
+    getValue?(key: symbol): unknown;
+    setValue?(key: symbol, value: unknown): Context;
+    deleteValue?(key: symbol): Context;
   }
 
   export interface Sampler {
@@ -63,8 +65,6 @@ declare module '@opentelemetry/api' {
 
   export const context: {
     active(): Context;
-    getValue(context: Context, key: string): unknown;
-    setValue(context: Context, key: string, value: unknown): Context;
     with<T>(context: Context, fn: () => T): T;
   };
 

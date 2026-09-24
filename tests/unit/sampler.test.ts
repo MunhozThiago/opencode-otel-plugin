@@ -5,12 +5,14 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { context } from "@opentelemetry/api";
 
-// Mock context.getValue for baggage
+// Real OTel Context has instance methods; keep mockContext bag-aware via symbol key
 vi.mock("@opentelemetry/api", async () => {
   const actual = await vi.importActual("@opentelemetry/api");
   const mockContext = {
-    getValue: vi.fn(),
-    setValue: vi.fn((ctx, key, value) => ctx),
+    getValue: vi.fn(() => undefined),
+    setValue: vi.fn(function (this: unknown, _key: symbol, _value: unknown) {
+      return this;
+    }),
   };
   return {
     ...actual,
