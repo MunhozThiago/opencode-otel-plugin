@@ -195,12 +195,18 @@ Prompt content is redacted unless `capturePromptInLogs: true`.
 ## Programmatic API
 
 ```ts
-import plugin, { forceFlush, getTracer, isPluginActive } from "opencode-otel-plugin";
+import plugin from "opencode-otel-plugin";
 
 const hooks = await plugin(input, { endpoint: "http://localhost:4318/v1/traces" });
 // …
-await forceFlush();
+await hooks.dispose?.();
 ```
+
+> **Important:** the entry module exports *only* the plugin factory. opencode's
+> plugin loader treats every function export as a separate plugin, so helpers
+> (`getTracer`, `getActiveSpans`, `isPluginActive`, `forceFlush`) must never be
+> exported from `src/index.ts` — doing so crashes the host with
+> `plugin config hook failed: undefined is not an object (evaluating 'N.config')`.
 
 ## Development
 

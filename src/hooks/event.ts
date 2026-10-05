@@ -30,6 +30,7 @@ import { mapPlanEvent, mapWorkflowEvent } from "../mappers/plan.js";
 import { generateConversationId, getConversationContext, getOrCreateConversationContext, generateAgentId, extractAgentInfo } from "../utils/ids.js";
 import type { GenAIMetrics } from "../otel/metrics.js";
 import type { AgentLogger } from "../otel/logs.js";
+import { resolveEventPayload } from "../mappers/validation.js";
 import { setBoundedMap, sweepMap, MAX_PENDING } from "../utils/bounded.js";
 import { setLlmRequestContext } from "../otel/llm-contexts.js";
 
@@ -55,6 +56,11 @@ interface EventHookState {
   sessionStartTimes: Map<string, number>;
   sessionTokenTotals: Map<string, number>;
   projectId?: string;
+  /**
+   * Last session id seen on any event. Real `file.edited` events carry only a
+   * path (no sessionID), so we attribute them to the active session.
+   */
+  lastSessionID?: string;
 }
 
 let hookState: EventHookState | null = null;
@@ -114,6 +120,19 @@ export async function handleEvent(input: { event: any }): Promise<void> {
   try {
     // Record operation duration for all events (best-effort)
     const startedAt = Date.now();
+
+    // Track the most recent session id seen (used as fallback for
+    // file.edited events, which only carry a path).
+    const seenSessionID =
+      (event as any)?.properties?.sessionID ??
+      (event as any)?.properties?.info?.sessionID ??
+      ((event as any)?.type === "session.created" ||
+      (event as any)?.type === "session.updated"
+        ? (event as any)?.properties?.info?.id
+        : undefined);
+    if (typeof seenSessionID === "string" && seenSessionID) {
+      hookState.lastSessionID = seenSessionID;
+    }
 
     // Attach project.id common attribute when known (P2)
     if (hookState.projectId) {
@@ -239,26 +258,50 @@ export async function handleEvent(input: { event: any }): Promise<void> {
       case 'command.executed':
         mapCommandExecuted(event as any, tracer, piiRedactor, activeSpans);
         if (hookState?.metrics) {
-          const info = (event as any).properties?.info;
-          if (info && info.exitCode === 0 && typeof info.command === 'string') {
-            if (/\bgit\s+commit\b/.test(info.command)) {
-              hookState.metrics.recordCommit({ 'command.name': info.command });
-              hookState.logs?.commit('git commit', { sessionId: info.sessionID });
-            }
+          // Flat shape: { name, sessionID, arguments, messageID } (no info)
+          const payload = resolveEventPayload(event) ?? {};
+          const cmd =
+            typeof payload.command === 'string'
+              ? payload.command
+              : typeof payload.name === 'string'
+                ? payload.name
+                : undefined;
+          const exitCode = payload.exitCode;
+          const exitOk = exitCode === undefined || exitCode === 0;
+          if (cmd && exitOk && /\bgit\s+commit\b/.test(cmd)) {
+            hookState.metrics.recordCommit({ 'command.name': cmd });
+            hookState.logs?.commit('git commit', {
+              sessionId:
+                (payload.sessionID as string | undefined) ?? hookState.lastSessionID,
+            });
           }
         }
         break;
 
       // File events
       case 'file.edited':
-        mapFileEdited(event as any, tracer, piiRedactor, activeSpans);
+        mapFileEdited(
+          event as any,
+          tracer,
+          piiRedactor,
+          activeSpans,
+          hookState.lastSessionID
+        );
         if (hookState?.metrics) {
-          const f = (event as any).properties?.info;
+          // Flat shape: { file: string } — no line counts, so nothing to record.
+          const f = resolveEventPayload(event);
           if (f && (f.linesAdded || f.linesRemoved)) {
-            hookState.metrics.recordLinesOfCode(f.linesAdded || 0, f.linesRemoved || 0, {
-              'file.operation': f.operation,
-              'gen_ai.session.id': f.sessionID,
-            });
+            hookState.metrics.recordLinesOfCode(
+              (f.linesAdded as number) || 0,
+              (f.linesRemoved as number) || 0,
+              {
+                'file.operation': (f.operation as string) ?? 'edit',
+                'gen_ai.session.id':
+                  (f.sessionID as string | undefined) ??
+                  hookState.lastSessionID ??
+                  'unknown',
+              }
+            );
           }
         }
         break;

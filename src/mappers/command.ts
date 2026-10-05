@@ -24,15 +24,25 @@ import {
   addSpanEvent,
   endSpan,
   setSpanAttribute,
+  resolveEventPayload,
 } from "./validation.js";
 
+/**
+ * Real opencode `command.executed` is flat:
+ * `{ name, sessionID, arguments, messageID }`. Legacy/extended shapes may
+ * nest under `info` with a `command` field instead of `name`.
+ */
 export interface CommandEvent {
   type: 'command.executed';
   properties: {
-    info: {
-      id: string;
-      sessionID: string;
-      command: string;
+    name?: string;
+    sessionID?: string;
+    arguments?: string;
+    messageID?: string;
+    info?: {
+      id?: string;
+      sessionID?: string;
+      command?: string;
       args?: string[];
       exitCode?: number;
       durationMs?: number;
@@ -42,6 +52,7 @@ export interface CommandEvent {
       startTime?: number;
       endTime?: number;
     };
+    [key: string]: unknown;
   };
 }
 
@@ -65,21 +76,37 @@ export function mapCommandExecuted(
     return null;
   }
 
-  const cmd = event.properties?.info;
-  if (!cmd) return null;
+  const payload = resolveEventPayload(event);
+  if (!payload) return null;
 
   // ─── Step 2: Validate command fields ─────────────────────────────
   const errors: string[] = [];
-  const sessionId = validateSessionId(cmd.sessionID);
-  const command = validateOptionalString(cmd.command, "command", errors);
-  const args = validateOptionalStringArray(cmd.args, "command.args", errors);
-  const exitCode = validateOptionalNumber(cmd.exitCode, "command.exitCode", errors);
-  const durationMs = validateOptionalNumber(cmd.durationMs, "command.durationMs", errors);
-  const stdout = validateOptionalString(cmd.stdout, "command.stdout", errors);
-  const stderr = validateOptionalString(cmd.stderr, "command.stderr", errors);
-  const workingDir = validateOptionalString(cmd.workingDir, "command.workingDir", errors);
-  const startTime = validateOptionalNumber(cmd.startTime, "command.startTime", errors);
-  const endTime = validateOptionalNumber(cmd.endTime, "command.endTime", errors);
+  const sessionId = validateSessionId(payload.sessionID);
+  if (!sessionId.valid) {
+    // Cannot attribute without a session — skip quietly
+    return null;
+  }
+  // Flat shape uses `name`; nested shape uses `command`.
+  const rawCommand =
+    typeof payload.command === "string" && payload.command
+      ? payload.command
+      : payload.name;
+  const command = validateId(rawCommand, "command", errors);
+  const args = Array.isArray(payload.args)
+    ? validateOptionalStringArray(payload.args, "command.args", errors)
+    : undefined;
+  // Flat shape: `arguments` is a raw command-line string
+  const rawArguments =
+    typeof payload.arguments === "string" && payload.arguments
+      ? payload.arguments
+      : undefined;
+  const exitCode = validateOptionalNumber(payload.exitCode, "command.exitCode", errors);
+  const durationMs = validateOptionalNumber(payload.durationMs, "command.durationMs", errors);
+  const stdout = validateOptionalString(payload.stdout, "command.stdout", errors);
+  const stderr = validateOptionalString(payload.stderr, "command.stderr", errors);
+  const workingDir = validateOptionalString(payload.workingDir, "command.workingDir", errors);
+  const startTime = validateOptionalNumber(payload.startTime, "command.startTime", errors);
+  const endTime = validateOptionalNumber(payload.endTime, "command.endTime", errors);
 
   if (errors.length > 0) {
     try {
@@ -95,18 +122,19 @@ export function mapCommandExecuted(
     const conversationId = generateConversationId(sessionId.value!);
     const agentId = generateAgentId('primary', sessionId.value!);
 
-    const spanName = `command.${command!.split(' ')[0]}`;
+    const spanName = `command.${command.value!.split(' ')[0]}`;
     const baseAttrs = createBaseAttributes(sessionId.value!, agentId, 'primary', conversationId, 'command', {
       agentDescription: 'Command executor',
       sessionId: sessionId.value!,
     });
     
     const cmdAttrs: Attributes = {
-      'command.name': command!,
+      'command.name': command.value!,
       'command.session_id': sessionId.value!,
     };
 
-    if (args) cmdAttrs['command.args'] = safeStringify(args);
+    const argsAttr = args ? safeStringify(args) : rawArguments;
+    if (argsAttr) cmdAttrs['command.args'] = argsAttr;
     if (exitCode !== undefined) {
       cmdAttrs['command.exit_code'] = exitCode;
       cmdAttrs['command.success'] = exitCode === 0;

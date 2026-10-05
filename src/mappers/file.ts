@@ -23,35 +23,47 @@ import {
   addSpanEvent,
   endSpan,
   setSpanAttribute,
+  resolveEventPayload,
 } from "./validation.js";
 
+/**
+ * Real opencode `file.edited` is `{ properties: { file: string } }` — flat,
+ * no sessionID, no operation. Legacy/extended shapes may nest under `info`.
+ */
 export interface FileEvent {
   type: 'file.edited';
   properties: {
-    info: {
-      id: string;
-      sessionID: string;
-      path: string;
-      operation: 'create' | 'read' | 'write' | 'delete' | 'edit';
+    file?: string;
+    sessionID?: string;
+    info?: {
+      id?: string;
+      sessionID?: string;
+      path?: string;
+      operation?: 'create' | 'read' | 'write' | 'delete' | 'edit';
       size?: number;
       linesAdded?: number;
       linesRemoved?: number;
-      content?: string; // For small files, or diff
+      content?: string;
       hash?: string;
       startTime?: number;
       endTime?: number;
     };
+    [key: string]: unknown;
   };
 }
 
 /**
- * Creates a file operation span
+ * Creates a file operation span.
+ *
+ * @param fallbackSessionId Last-seen session id — real `file.edited` events
+ *   carry only a path, so we attribute them to the active session when known.
  */
 export function mapFileEdited(
   event: FileEvent,
   tracer: ReturnType<typeof trace.getTracer>,
   piiRedactor: any,
-  activeSpans: Map<string, Span>
+  activeSpans: Map<string, Span>,
+  fallbackSessionId?: string
 ): Span | null {
   // ─── Step 1: Validate event structure ───────────────────────────
   const shapeValidation = validateEventShape(event, "file.edited");
@@ -64,19 +76,30 @@ export function mapFileEdited(
     return null;
   }
 
-  const file = event.properties?.info;
+  const file = resolveEventPayload(event);
   if (!file) return null;
 
   // ─── Step 2: Validate file fields ───────────────────────────────
   const errors: string[] = [];
-  const sessionId = validateSessionId(file.sessionID);
-  const path = validateOptionalString(file.path, "file.path", errors);
-  const operation = validateOneOf(
-    file.operation,
-    ["create", "read", "write", "delete", "edit"],
-    "file.operation",
-    errors
-  );
+  const sessionID =
+    (typeof file.sessionID === "string" && file.sessionID) || fallbackSessionId;
+  const sessionId = validateSessionId(sessionID);
+  if (!sessionId.valid) {
+    // Real file.edited events have no sessionID; without a fallback session
+    // we cannot attribute the event — skip quietly (not a malformed event).
+    return null;
+  }
+  // Flat shape exposes the path as `file`; nested shape uses `path`.
+  const path = validateId(file.path ?? file.file, "file.path", errors);
+  const operation =
+    file.operation === undefined
+      ? "edit"
+      : validateOneOf(
+          file.operation,
+          ["create", "read", "write", "delete", "edit"],
+          "file.operation",
+          errors
+        );
   const size = validateOptionalNumber(file.size, "file.size", errors);
   const linesAdded = validateOptionalNumber(file.linesAdded, "file.linesAdded", errors);
   const linesRemoved = validateOptionalNumber(file.linesRemoved, "file.linesRemoved", errors);
@@ -106,7 +129,7 @@ export function mapFileEdited(
     });
     
     const fileAttrs: Attributes = {
-      'file.path': path!,
+      'file.path': path.value!,
       'file.operation': operation!,
       'file.session_id': sessionId.value!,
     };

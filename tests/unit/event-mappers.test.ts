@@ -558,3 +558,211 @@ describe("Plan/Workflow Mapper", () => {
     expect(mockSpan.end).toHaveBeenCalled();
   });
 });
+
+// ─── Real opencode SDK Event Shapes ──────────────────────────────────────────
+// Shapes taken from @opencode-ai/sdk gen/types.gen.d.ts (the actual payloads
+// opencode emits). These must map without validation warnings.
+
+describe("Real SDK Shapes", () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  describe("file.edited → { properties: { file: string } }", () => {
+    it("maps a flat file event using the fallback session", async () => {
+      const { mapFileEdited } = await import("../../src/mappers/file.js");
+      const tracer = createMockTracer();
+      const piiRedactor = createMockPiiRedactor();
+      const activeSpans = new Map();
+      const rootSpan = createMockSpan();
+      activeSpans.set(`${CONV_ID}:root`, rootSpan);
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = mapFileEdited(
+        { type: "file.edited", properties: { file: "/home/user/project/src/index.ts" } } as any,
+        tracer as any,
+        piiRedactor,
+        activeSpans,
+        SESSION_ID
+      );
+
+      expect(result).not.toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+      expect(tracer.startSpan).toHaveBeenCalledWith(
+        "file.edit",
+        expect.objectContaining({ kind: SpanKind.INTERNAL })
+      );
+      expect(rootSpan.addEvent).toHaveBeenCalledWith("file.edited", expect.objectContaining({
+        "file.path": "/home/user/project/src/index.ts",
+        "file.operation": "edit",
+        "file.session_id": SESSION_ID,
+      }));
+      warn.mockRestore();
+    });
+
+    it("returns null quietly when no fallback session is known", async () => {
+      const { mapFileEdited } = await import("../../src/mappers/file.js");
+      const tracer = createMockTracer();
+      const piiRedactor = createMockPiiRedactor();
+      const activeSpans = new Map();
+      activeSpans.set(`${CONV_ID}:root`, createMockSpan());
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = mapFileEdited(
+        { type: "file.edited", properties: { file: "/tmp/x.ts" } } as any,
+        tracer as any,
+        piiRedactor,
+        activeSpans
+      );
+
+      expect(result).toBeNull();
+      // Not a malformed event → no validation warning noise
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
+  describe("command.executed → { properties: { name, sessionID, arguments } }", () => {
+    it("maps a flat command event", async () => {
+      const { mapCommandExecuted } = await import("../../src/mappers/command.js");
+      const tracer = createMockTracer();
+      const piiRedactor = createMockPiiRedactor();
+      const activeSpans = new Map();
+      const rootSpan = createMockSpan();
+      activeSpans.set(`${CONV_ID}:root`, rootSpan);
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = mapCommandExecuted(
+        {
+          type: "command.executed",
+          properties: { name: "ls -la", sessionID: SESSION_ID, arguments: "-la /tmp", messageID: "msg-1" },
+        } as any,
+        tracer as any,
+        piiRedactor,
+        activeSpans
+      );
+
+      expect(result).not.toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+      expect(tracer.startSpan).toHaveBeenCalledWith(
+        "command.ls",
+        expect.objectContaining({ kind: SpanKind.INTERNAL })
+      );
+      expect(rootSpan.addEvent).toHaveBeenCalledWith("command.executed", expect.objectContaining({
+        "command.name": "ls -la",
+        "command.session_id": SESSION_ID,
+        "command.args": "-la /tmp",
+      }));
+      warn.mockRestore();
+    });
+
+    it("returns null quietly when sessionID is missing", async () => {
+      const { mapCommandExecuted } = await import("../../src/mappers/command.js");
+      const tracer = createMockTracer();
+      const piiRedactor = createMockPiiRedactor();
+      const activeSpans = new Map();
+      activeSpans.set(`${CONV_ID}:root`, createMockSpan());
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = mapCommandExecuted(
+        { type: "command.executed", properties: { name: "pwd" } } as any,
+        tracer as any,
+        piiRedactor,
+        activeSpans
+      );
+
+      expect(result).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
+  describe("todo.updated → { properties: { sessionID, todos: Todo[] } }", () => {
+    it("maps the todos array onto the root span", async () => {
+      const { mapTodoUpdated } = await import("../../src/mappers/todo.js");
+      const tracer = createMockTracer();
+      const activeSpans = new Map();
+      const rootSpan = createMockSpan();
+      activeSpans.set(`${CONV_ID}:root`, rootSpan);
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = mapTodoUpdated(
+        {
+          type: "todo.updated",
+          properties: {
+            sessionID: SESSION_ID,
+            todos: [
+              { id: "t1", content: "First", status: "pending", priority: "high" },
+              { id: "t2", content: "Second", status: "in_progress" },
+            ],
+          },
+        } as any,
+        tracer as any,
+        activeSpans
+      );
+
+      expect(result).not.toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+      expect(rootSpan.addEvent).toHaveBeenCalledTimes(2);
+      expect(rootSpan.addEvent).toHaveBeenCalledWith("todo.updated", expect.objectContaining({
+        "todo.id": "t1",
+        "todo.content": "First",
+        "todo.status": "pending",
+        "todo.priority": "high",
+      }));
+      expect(rootSpan.addEvent).toHaveBeenCalledWith("todo.updated", expect.objectContaining({
+        "todo.id": "t2",
+        "todo.status": "in_progress",
+      }));
+      expect(tracer.startSpan).toHaveBeenCalledTimes(2);
+      warn.mockRestore();
+    });
+
+    it("returns null quietly when sessionID is missing", async () => {
+      const { mapTodoUpdated } = await import("../../src/mappers/todo.js");
+      const tracer = createMockTracer();
+      const activeSpans = new Map();
+      activeSpans.set(`${CONV_ID}:root`, createMockSpan());
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = mapTodoUpdated(
+        { type: "todo.updated", properties: { todos: [{ id: "t1", content: "x", status: "pending" }] } } as any,
+        tracer as any,
+        activeSpans
+      );
+
+      expect(result).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
+  describe("validateEventShape / resolveEventPayload", () => {
+    it("accepts events without an `info` object", async () => {
+      const { validateEventShape, resolveEventPayload } = await import(
+        "../../src/mappers/validation.js"
+      );
+
+      const flat = { type: "file.edited", properties: { file: "/a.ts" } };
+      expect(validateEventShape(flat, "file.edited").valid).toBe(true);
+      expect(resolveEventPayload(flat)).toEqual({ file: "/a.ts" });
+
+      const nested = { type: "session.created", properties: { info: { id: "s1" } } };
+      expect(validateEventShape(nested, "session.created").valid).toBe(true);
+      expect(resolveEventPayload(nested)).toEqual({ id: "s1" });
+    });
+
+    it("still rejects missing/mismatched type or properties", async () => {
+      const { validateEventShape } = await import("../../src/mappers/validation.js");
+
+      expect(validateEventShape(undefined, "file.edited").valid).toBe(false);
+      expect(validateEventShape({ type: "other", properties: {} }, "file.edited").valid).toBe(false);
+      expect(validateEventShape({ type: "file.edited" }, "file.edited").valid).toBe(false);
+      expect(validateEventShape({ type: "file.edited", properties: "x" }, "file.edited").valid).toBe(false);
+    });
+  });
+});

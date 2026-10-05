@@ -219,28 +219,11 @@ async function shutdown(): Promise<void> {
   }
 }
 
-// ─── Utility Exports ───────────────────────────────────────────────────────────
-
-export function getTracer(): ReturnType<typeof trace.getTracer> | null {
-  return pluginState ? trace.getTracer('opencode-otel-plugin', pluginState.config.serviceVersion) : null;
-}
-
-export function getActiveSpans(): Map<string, any> | null {
-  return pluginState?.activeSpans || null;
-}
-
-export function isPluginActive(): boolean {
-  return pluginState !== null && !pluginState.isShuttingDown;
-}
-
-/** Manually force-flush traces/metrics/logs (also called on idle/error/signals). */
-export async function forceFlush(): Promise<void> {
-  if (pluginState?.providerSetup?.forceFlush) {
-    await pluginState.providerSetup.forceFlush();
-  }
-}
-
 // ─── Export ───────────────────────────────────────────────────────────────────
+// NOTE: Do not export non-plugin helper functions from this entry.
+// opencode's plugin loader treats every function export as a plugin factory;
+// helpers that return null/undefined corrupt the hooks list (N.config crash).
+// Use the "./utils" subpath export for helpers instead.
 
 export default plugin;
 /** Named export for hosts that resolve named plugin exports (e.g. opencode). */

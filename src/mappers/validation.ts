@@ -63,7 +63,12 @@ export function isOneOf<T extends string>(
 }
 
 /**
- * Validates the common event shape
+ * Validates the common event shape.
+ *
+ * NOTE: opencode event payloads are inconsistent — some nest under
+ * `properties.info` (session.*), others are flat (`file.edited` →
+ * `{ file: string }`, `command.executed` → `{ name, sessionID, ... }`).
+ * Do NOT require `info` here; use resolveEventPayload() instead.
  */
 export function validateEventShape(event: unknown, eventType: string): ValidationResult {
   const errors: string[] = [];
@@ -88,12 +93,23 @@ export function validateEventShape(event: unknown, eventType: string): Validatio
     return { valid: false, errors };
   }
   
-  if (!isRecord(event.properties.info, "event.properties.info")) {
-    errors.push("event.properties.info must be an object");
-    return { valid: false, errors };
-  }
-  
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Resolves the payload of an opencode event regardless of nesting.
+ *
+ * - Nested shape:  `{ properties: { info: {...} } }`  → returns `info`
+ * - Flat shape:    `{ properties: { file: "x" } }`    → returns `properties`
+ * - Otherwise:     `undefined`
+ */
+export function resolveEventPayload(event: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(event, "event")) return undefined;
+  const properties = (event as Record<string, unknown>).properties;
+  if (!isRecord(properties, "event.properties")) return undefined;
+  const info = (properties as Record<string, unknown>).info;
+  if (isRecord(info, "event.properties.info")) return info;
+  return properties;
 }
 
 /**
