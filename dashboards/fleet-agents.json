@@ -1,0 +1,90 @@
+{
+  "title": "Fleet Agent Operations",
+  "description": "Multi-agent fleet telemetry dashboard. KPIs, tool usage, model efficiency, and session health for managing fleets of AI agents.",
+  "widgets": [
+    {
+      "title": "Active Sessions (5m)",
+      "layout": { "row": 1, "column": 1, "width": 3, "height": 2 },
+      "visualization": { "type": "visualization", "id": "viz-table" },
+      "raw": "SELECT count(distinct attributes.session.id) FROM Span WHERE attributes.session.id IS NOT NULL AND event.timestamp > ago(5m)"
+    },
+    {
+      "title": "Total Tool Calls",
+      "layout": { "row": 1, "column": 4, "width": 3, "height": 2 },
+      "visualization": { "type": "visualization", "id": "viz-table" },
+      "raw": "SELECT count(*) FROM Span WHERE name LIKE 'tool.%'"
+    },
+    {
+      "title": "Sessions per Model",
+      "layout": { "row": 1, "column": 7, "width": 3, "height": 2 },
+      "visualization": { "type": "visualization", "id": "viz-table" },
+      "raw": "SELECT count(distinct attributes.session.id) FROM Span WHERE attributes.gen_ai.request.model IS NOT NULL FACET attributes.gen_ai.request.model"
+    },
+    {
+      "title": "Total Cost (USD)",
+      "layout": { "row": 1, "column": 10, "width": 3, "height": 2 },
+      "visualization": { "type": "visualization", "id": "viz-table" },
+      "raw": "SELECT sum(cost) FROM Metric WHERE metric.name = 'cost.usage'"
+    },
+    {
+      "title": "Session Success Rate",
+      "layout": { "row": 1, "column": 13, "width": 3, "height": 2 },
+      "visualization": { "type": "visualization", "id": "viz-table" },
+      "raw": "SELECT (filter(count(*), WHERE name = 'session.idle') / filter(count(*), WHERE name = 'session.created')) * 100 FROM Span"
+    },
+    {
+      "title": "Sessions Timeline",
+      "layout": { "row": 2, "column": 1, "width": 12, "height": 5 },
+      "visualization": { "type": "visualization", "id": "viz-line" },
+      "raw": "SELECT count(distinct attributes.session.id) FROM Span WHERE name = 'agent.session.primary' TIMESERIES AUTO"
+    },
+    {
+      "title": "Tool Usage Heatmap",
+      "layout": { "row": 3, "column": 1, "width": 6, "height": 5 },
+      "visualization": { "type": "visualization", "id": "viz-table" },
+      "raw": "SELECT count(*) as calls, count(filter(*, WHERE attributes.tool.error = 1)) as errors, round(count(*)/count(*), 2) as error_rate, attributes.tool.name FROM Span WHERE name = 'tool.execute.after' FACET attributes.tool.name ORDER BY calls DESC LIMIT 50"
+    },
+    {
+      "title": "Agent-Model Matrix",
+      "layout": { "row": 3, "column": 7, "width": 5, "height": 5 },
+      "visualization": { "type": "visualization", "id": "viz-table" },
+      "raw": "SELECT count(distinct attributes.session.id) as sessions, count(distinct attributes.gen_ai.system) as agent_roles FROM Span WHERE attributes.session.id IS NOT NULL FACET attributes.gen_ai.system, attributes.gen_ai.request.model"
+    },
+    {
+      "title": "Complexity vs Outcome",
+      "layout": { "row": 3, "column": 12, "width": 6, "height": 5 },
+      "visualization": { "type": "visualization", "id": "viz-table" },
+      "raw": "SELECT attributes.session.id, sum(attributes.gen_ai.token_usage.input) as input_tokens, sum(attributes.gen_ai.token_usage.output) as output_tokens, count(*) as spans FROM Span WHERE attributes.session.id IS NOT NULL FACET attributes.session.id LIMIT 200"
+    },
+    {
+      "title": "Tool Execution Latency",
+      "layout": { "row": 4, "column": 1, "width": 6, "height": 5 },
+      "visualization": { "type": "visualization", "id": "viz-histogram" },
+      "raw": "SELECT histogram(duration, 100, 500, 1000, 5000, 10000) FROM Span WHERE name LIKE 'tool.%' FACET name"
+    },
+    {
+      "title": "Model Efficiency",
+      "layout": { "row": 4, "column": 7, "width": 5, "height": 5 },
+      "visualization": { "type": "visualization", "id": "viz-bar" },
+      "raw": "SELECT count(*) as invocations, sum(attributes.gen_ai.token_usage.input) as input_tokens, sum(cost) as cost FROM Metric WHERE metric.name = 'gen_ai.client.invocation.count' FACET attributes.gen_ai.request.model"
+    },
+    {
+      "title": "Session Latency",
+      "layout": { "row": 4, "column": 12, "width": 6, "height": 5 },
+      "visualization": { "type": "visualization", "id": "viz-table" },
+      "raw": "SELECT attributes.session.id, sum(attributes.gen_ai.token_usage.total) as tokens, sum(cost) as cost FROM Metric WHERE metric.name = 'gen_ai.client.token.usage' OR metric.name = 'session.cost.total' FACET attributes.session.id LIMIT 100"
+    },
+    {
+      "title": "Error / Failure Tracking",
+      "layout": { "row": 5, "column": 1, "width": 6, "height": 5 },
+      "visualization": { "type": "visualization", "id": "viz-line" },
+      "raw": "SELECT count(*) FROM Span WHERE attributes.tool.error = 1 OR name = 'session.error' TIMESERIES AUTO"
+    },
+    {
+      "title": "Tool Decision Log",
+      "layout": { "row": 5, "column": 7, "width": 5, "height": 5 },
+      "visualization": { "type": "visualization", "id": "viz-table" },
+      "raw": "SELECT event.timestamp, attributes.session.id, attributes.tool.name, attributes.tool.error FROM Log WHERE event.name = 'tool_result' ORDER BY event.timestamp DESC LIMIT 50"
+    }
+  ]
+}
