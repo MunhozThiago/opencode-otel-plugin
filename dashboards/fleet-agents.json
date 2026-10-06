@@ -10,11 +10,11 @@
       "widgets": [
         {
           "guid": "VIZ_1",
-          "name": "Active Sessions (5m)",
-          "description": "Sessions active in the last 5 minutes",
+          "name": "Active Sessions",
+          "description": "Total active sessions",
           "visualization": {
             "type": "nrql",
-            "raw": "SELECT count(*) FROM Span WHERE attributes.session.id IS NOT NULL AND timestamp > ago(5m)"
+            "raw": "SELECT count(distinct attributes.session.id) FROM Span WHERE attributes.session.id IS NOT NULL"
           }
         },
         {
@@ -47,7 +47,7 @@
         {
           "guid": "VIZ_5",
           "name": "Sessions Timeline",
-          "description": "Sessions over time (line chart)",
+          "description": "Sessions over time",
           "visualization": {
             "type": "nrql",
             "raw": "SELECT count(*) FROM Span WHERE name = 'agent.session.primary' TIMESERIES AUTO"
