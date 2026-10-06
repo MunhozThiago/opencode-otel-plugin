@@ -127,6 +127,7 @@ export async function createProvider(config: RequiredConfig): Promise<ProviderSe
       genAIMetrics = new GenAIMetrics(metricsSetup.meterProvider, {
         metricPrefix: config.metricPrefix,
         disabledMetrics: config.disabledMetrics,
+        commonAttributes: commonTelemetryAttributes(config),
       });
       // Global meter provider registration (P2)
       try {
@@ -150,6 +151,7 @@ export async function createProvider(config: RequiredConfig): Promise<ProviderSe
         agentLogger = new AgentLogger(logsSetup.logger, {
           logsEnabled: config.logsEnabled ?? true,
           capturePromptInLogs: config.capturePromptInLogs ?? false,
+          commonAttributes: commonTelemetryAttributes(config),
         });
         // Global logger provider registration (P2)
         try {
@@ -238,6 +240,16 @@ function createResource(config: RequiredConfig) {
 }
 
 // ─── Attribute Enrichment Helper ──────────────────────────────────────────────
+
+/**
+ * Attributes added to every metric datapoint and log record (in addition to
+ * the OTLP resource). Currently project.id so all signals stay filterable by
+ * project even when a backend drops resource flattening.
+ */
+export function commonTelemetryAttributes(config: RequiredConfig): Record<string, string> {
+  const projectId = config.resourceAttributes?.["project.id"];
+  return projectId ? { "project.id": projectId } : {};
+}
 
 export function enrichSpanAttributes(
   span: Span,

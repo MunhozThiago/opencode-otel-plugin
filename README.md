@@ -66,6 +66,9 @@ Precedence: **explicit options > `OPENCODE_*` env > defaults**.
 | `serviceVersion` | `OPENCODE_OTEL_SERVICE_VERSION` | `1.0.0` | |
 | `environment` | `OPENCODE_OTEL_ENVIRONMENT` | `development` | |
 | `headers` | `OPENCODE_OTEL_HEADERS` | `{}` | `k=v,k2=v2` (CR/LF rejected) |
+| `apiKey` | `OPENCODE_OTEL_API_KEY` | — | Shorthand auth token sent as `authHeaderName` (inline in opencode config) |
+| `apiKeyFile` | `OPENCODE_OTEL_API_KEY_FILE` | — | File path; first non-empty line is the key (`KEY=value` also accepted) |
+| `authHeaderName` | `OPENCODE_OTEL_AUTH_HEADER_NAME` | `api-key` | Header used by `apiKey`/`apiKeyFile`; explicit `headers[name]` wins |
 | `headersHelper` | `OPENCODE_OTEL_HEADERS_HELPER` | — | Executable path; stdout JSON `{"Authorization":"Bearer …"}` |
 | `headersHelperTimeoutMs` | `OPENCODE_OTEL_HEADERS_HELPER_TIMEOUT_MS` | `5000` | |
 | `traceparent` | `OPENCODE_TRACEPARENT` | — | Remote parent (W3C) |
@@ -90,6 +93,16 @@ Precedence: **explicit options > `OPENCODE_*` env > defaults**.
 | `logsEnabled` | `OPENCODE_OTEL_LOGS_ENABLED` | `true` | |
 | `capturePromptInLogs` | `OPENCODE_OTEL_CAPTURE_PROMPT` | `false` | Off → prompts redacted |
 | `debug` | `OPENCODE_OTEL_DEBUG` | `false` | |
+
+### Session & project context
+
+Every signal carries the same context so you can filter by session in any backend:
+
+- **Spans** — `session.id`, `session.name`, `session.title`, `session.directory`, `gen_ai.conversation.id` (filled at span start from the live registry, backfilled at span end)
+- **Metrics** — `session.id`, `session.name`, `project.id` merged into every datapoint
+- **Logs** — `session.id`, `session.name`, `project.id` merged into every record
+
+`session.name` comes from the session title observed at `session.created`/`session.updated`/first prompt. `project.id` derives from `resourceAttributes.project.id`.
 
 ### OTEL bridge
 

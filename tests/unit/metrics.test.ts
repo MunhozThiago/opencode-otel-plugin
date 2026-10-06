@@ -158,7 +158,10 @@ describe("Metrics Module", () => {
 
     it("recordSessionCount / recordCommit / recordSubtask should add 1", () => {
       metrics.recordSessionCount({ "gen_ai.session.id": "s1" });
-      expect(mock.counters["session.count"].add).toHaveBeenCalledWith(1, { "gen_ai.session.id": "s1" });
+      expect(mock.counters["session.count"].add).toHaveBeenCalledWith(1, {
+        "gen_ai.session.id": "s1",
+        "session.id": "s1",
+      });
       metrics.recordCommit();
       expect(mock.counters["commit.count"].add).toHaveBeenCalledWith(1, {});
       metrics.recordSubtask({ to: "explore" });
@@ -209,6 +212,40 @@ describe("Metrics Module", () => {
       );
     });
   });
+
+    it("enriches datapoints with session.id / session.name and commonAttributes", async () => {
+      const registry = await import("../../dist/utils/session-registry.js");
+      registry.clearSessionRegistry();
+      registry.rememberSession("ses_m", "Metrics Session");
+      const localMock = createMockMeter();
+      const enriched = new GenAIMetrics(
+        { getMeter: vi.fn(() => localMock.meter) },
+        { commonAttributes: { "project.id": "proj_1" } }
+      );
+      enriched.recordTokenUsage(5, 3, {
+        "gen_ai.session.id": "ses_m",
+        "gen_ai.request.model": "m1",
+      });
+      expect(localMock.counters["gen_ai.client.token.usage.input"].add).toHaveBeenCalledWith(5, {
+        "project.id": "proj_1",
+        "gen_ai.session.id": "ses_m",
+        "gen_ai.request.model": "m1",
+        "session.id": "ses_m",
+        "session.name": "Metrics Session",
+      });
+    });
+
+    it("adds commonAttributes even without a session id", () => {
+      const localMock = createMockMeter();
+      const enriched = new GenAIMetrics(
+        { getMeter: vi.fn(() => localMock.meter) },
+        { commonAttributes: { "project.id": "proj_1" } }
+      );
+      enriched.recordCommit();
+      expect(localMock.counters["commit.count"].add).toHaveBeenCalledWith(1, {
+        "project.id": "proj_1",
+      });
+    });
 
   describe("createMetricsSetup", () => {
     it("succeeds with default batch config (interval >= timeout)", async () => {

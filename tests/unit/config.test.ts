@@ -3,7 +3,18 @@
  */
 
 import { describe, it, expect } from "vitest";
+import { writeFileSync, mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { mergeConfig, validateConfig, defaults } from "../../dist/config.js";
+
+let tempDir: string | undefined;
+function writeTempKeyFile(contents: string): string {
+  if (!tempDir) tempDir = mkdtempSync(join(tmpdir(), "otel-apikey-"));
+  const file = join(tempDir, `key-${Math.random().toString(36).slice(2)}.env`);
+  writeFileSync(file, contents);
+  return file;
+}
 
 describe("Configuration", () => {
   describe("mergeConfig", () => {
@@ -251,6 +262,70 @@ describe("Configuration", () => {
         environment: "production",
       });
       expect(() => validateConfig(config)).not.toThrow();
+    });
+  });
+
+  describe("apiKey configuration", () => {
+    it("should send apiKey as the default api-key header", () => {
+      const config = mergeConfig({ apiKey: "nr-key-123" });
+      expect(config.headers["api-key"]).toBe("nr-key-123");
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it("should support a custom authHeaderName", () => {
+      const config = mergeConfig({ apiKey: "tok", authHeaderName: "Authorization" });
+      expect(config.headers["Authorization"]).toBe("tok");
+      expect(config.headers["api-key"]).toBeUndefined();
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it("should let an explicit header win over apiKey", () => {
+      const config = mergeConfig({
+        apiKey: "from-key",
+        headers: { "api-key": "from-headers" },
+      });
+      expect(config.headers["api-key"]).toBe("from-headers");
+    });
+
+    it("should prefer apiKey over apiKeyFile", () => {
+      const file = writeTempKeyFile("file-key\n");
+      const config = mergeConfig({ apiKey: "inline-key", apiKeyFile: file });
+      expect(config.headers["api-key"]).toBe("inline-key");
+    });
+
+    it("should read the key from apiKeyFile (first non-empty line)", () => {
+      const file = writeTempKeyFile("\nfile-key-42\nsecond-line\n");
+      const config = mergeConfig({ apiKeyFile: file });
+      expect(config.headers["api-key"]).toBe("file-key-42");
+      expect(() => validateConfig(config)).not.toThrow();
+    });
+
+    it("should accept KEY=value style apiKeyFile contents", () => {
+      const file = writeTempKeyFile("NEW_RELIC_LICENSE_KEY=eu01-abc\n");
+      const config = mergeConfig({ apiKeyFile: file });
+      expect(config.headers["api-key"]).toBe("eu01-abc");
+    });
+
+    it("should throw for a missing apiKeyFile", () => {
+      expect(() => mergeConfig({ apiKeyFile: "C:/definitely/missing.key" })).toThrow(
+        /cannot read apiKeyFile/
+      );
+    });
+
+    it("should throw for an empty apiKeyFile", () => {
+      const file = writeTempKeyFile("\n   \n");
+      expect(() => mergeConfig({ apiKeyFile: file })).toThrow(/contains no key/);
+    });
+
+    it("should reject an invalid authHeaderName", () => {
+      const config = mergeConfig({ apiKey: "k", authHeaderName: "bad header" });
+      expect(() => validateConfig(config)).toThrow(/authHeaderName/);
+    });
+
+    it("should reject a CR/LF-bearing apiKey", () => {
+      const config = mergeConfig();
+      config.apiKey = "evil\r\ninjected: 1";
+      expect(() => validateConfig(config)).toThrow(/CR\/LF/);
     });
   });
 });

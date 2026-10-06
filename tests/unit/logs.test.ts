@@ -38,7 +38,7 @@ describe("Logs Module", () => {
         severityNumber: LogSeverity.INFO,
         severityText: "INFO",
         body: "session started",
-        attributes: { sessionId: "s1" },
+        attributes: { sessionId: "s1", "session.id": "s1" },
       });
     });
 
@@ -84,7 +84,7 @@ describe("Logs Module", () => {
       });
       expect(mockLogger.emit).toHaveBeenCalledWith(
         expect.objectContaining({
-          attributes: { sessionId: "s1" },
+          attributes: { sessionId: "s1", "session.id": "s1" },
         })
       );
     });
@@ -184,7 +184,7 @@ describe("Logs Module", () => {
         severityNumber: LogSeverity.INFO,
         severityText: "INFO",
         body: "plain",
-        attributes: { sessionId: "s1" },
+        attributes: { sessionId: "s1", "session.id": "s1" },
       });
     });
 
@@ -201,6 +201,24 @@ describe("Logs Module", () => {
       expect(mockLogger.emit).toHaveBeenLastCalledWith(
         expect.objectContaining({
           attributes: expect.objectContaining({ prompt: "visible" }),
+        })
+      );
+    });
+
+    it("adds session.name and commonAttributes to log records", async () => {
+      const registry = await import("../../dist/utils/session-registry.js");
+      registry.clearSessionRegistry();
+      registry.rememberSession("s9", "Log Session");
+      const l = new AgentLogger(mockLogger, { commonAttributes: { "project.id": "proj_1" } });
+      l.info("hello", { sessionId: "s9" });
+      expect(mockLogger.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          attributes: expect.objectContaining({
+            sessionId: "s9",
+            "session.id": "s9",
+            "session.name": "Log Session",
+            "project.id": "proj_1",
+          }),
         })
       );
     });

@@ -8,6 +8,7 @@ import type { RequiredConfig } from "../config.js";
 import { createLogsExporter } from "./exporter.js";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, ATTR_DEPLOYMENT_ENVIRONMENT_NAME } from "@opentelemetry/semantic-conventions";
+import { sessionAttributes } from "../utils/session-registry.js";
 
 // ─── Log Severity Mapping ─────────────────────────────────────────────────────
 
@@ -110,16 +111,22 @@ export class AgentLogger {
   private logger: any;
   private logsEnabled: boolean;
   private capturePromptInLogs: boolean;
+  private commonAttributes: Record<string, string>;
 
-  constructor(logger: any, options?: { logsEnabled?: boolean; capturePromptInLogs?: boolean }) {
+  constructor(logger: any, options?: {
+    logsEnabled?: boolean;
+    capturePromptInLogs?: boolean;
+    commonAttributes?: Record<string, string>;
+  }) {
     this.logger = logger;
     this.logsEnabled = options?.logsEnabled ?? true;
     this.capturePromptInLogs = options?.capturePromptInLogs ?? false;
+    this.commonAttributes = options?.commonAttributes ?? {};
   }
 
   emitEvent(eventName: string | undefined, message: string, severity: number, severityText: string, attributes: AgentLogAttributes = {}): void {
     if (!this.logsEnabled) return;
-    const finalAttrs: AgentLogAttributes = { ...attributes };
+    const finalAttrs: AgentLogAttributes = { ...this.commonAttributes, ...attributes };
     if (eventName) {
       finalAttrs['event.name'] = eventName;
     }
@@ -128,6 +135,13 @@ export class AgentLogger {
         if (key === 'prompt' || key === 'user_prompt' || key === 'content') {
           finalAttrs[key] = '[REDACTED]';
         }
+      }
+    }
+    // Canonical session.id / session.name for backend filtering
+    const rawSessionId = finalAttrs.sessionId ?? finalAttrs['session.id'];
+    if (typeof rawSessionId === 'string') {
+      for (const [key, value] of Object.entries(sessionAttributes(rawSessionId, finalAttrs.conversationId))) {
+        if (finalAttrs[key] === undefined) finalAttrs[key] = value;
       }
     }
     this.logger.emit({

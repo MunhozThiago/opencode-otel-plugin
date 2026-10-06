@@ -33,6 +33,7 @@ import type { AgentLogger } from "../otel/logs.js";
 import { resolveEventPayload } from "../mappers/validation.js";
 import { setBoundedMap, MAX_PENDING } from "../utils/bounded.js";
 import { setLlmRequestContext } from "../otel/llm-contexts.js";
+import { rememberSession } from "../utils/session-registry.js";
 
 // ─── Hook State ────────────────────────────────────────────────────────────────
 
@@ -159,9 +160,15 @@ export async function handleEvent(input: { event: any }): Promise<void> {
       case 'session.created':
         await handleSessionCreated(event, tracer, piiRedactor, activeSpans, agentRegistry, conversationContexts);
         break;
-      case 'session.updated':
+      case 'session.updated': {
+        // Keep the session name (title) fresh for session.name attribute
+        const updatedInfo = (event as any)?.properties?.info;
+        if (updatedInfo?.id) {
+          rememberSession(updatedInfo.id, updatedInfo.title, undefined);
+        }
         sessionMapper.updated(event, activeSpans);
         break;
+      }
       case 'session.deleted':
         sessionMapper.deleted(event, activeSpans);
         break;
@@ -277,10 +284,13 @@ export async function handleEvent(input: { event: any }): Promise<void> {
           const exitCode = payload.exitCode;
           const exitOk = exitCode === undefined || exitCode === 0;
           if (cmd && exitOk && /\bgit\s+commit\b/.test(cmd)) {
-            hookState.metrics.recordCommit({ 'command.name': cmd });
+            const commitSessionID =
+              (payload.sessionID as string | undefined) ?? hookState.lastSessionID;
+            const commitAttrs: Record<string, string> = { 'command.name': cmd };
+            if (commitSessionID) commitAttrs['gen_ai.session.id'] = commitSessionID;
+            hookState.metrics.recordCommit(commitAttrs);
             hookState.logs?.commit('git commit', {
-              sessionId:
-                (payload.sessionID as string | undefined) ?? hookState.lastSessionID,
+              sessionId: commitSessionID,
             });
           }
         }
@@ -379,13 +389,19 @@ export async function handleEvent(input: { event: any }): Promise<void> {
 
     // Record metrics for handled events (session/message ops)
     if (hookState?.metrics && isMetricEvent(event.type)) {
+      const metricSessionAttrs: Record<string, string> = {};
+      if (hookState.lastSessionID) {
+        metricSessionAttrs['gen_ai.session.id'] = hookState.lastSessionID;
+      }
       hookState.metrics.recordInvocation({
         'gen_ai.operation.name': mapEventToOperation(event.type),
         'event.type': event.type,
+        ...metricSessionAttrs,
       });
       hookState.metrics.recordDuration(Date.now() - startedAt, {
         'gen_ai.operation.name': mapEventToOperation(event.type),
         'event.type': event.type,
+        ...metricSessionAttrs,
       });
     }
 
@@ -393,6 +409,7 @@ export async function handleEvent(input: { event: any }): Promise<void> {
       hookState.logs.debug(`handled ${event.type}`, {
         operation: mapEventToOperation(event.type),
         durationMs: Date.now() - startedAt,
+        sessionId: hookState.lastSessionID,
       });
     }
   } catch (error) {
@@ -555,6 +572,9 @@ async function handleSessionCreated(
   const agentName = session.agent || "primary";
   const agentId = generateAgentId(agentName, sessionId);
 
+  // Register session id + name (title) for session.id / session.name attributes
+  rememberSession(sessionId, session.title ?? session.name, conversationId);
+
   // Create conversation context (bounded)
   const convCtx = getOrCreateConversationContext(conversationId, sessionId, agentId, agentName);
   setBoundedMap(conversationContexts, conversationId, convCtx, MAX_PENDING);
@@ -636,6 +656,7 @@ async function handleMessageUpdated(
       'gen_ai.operation.name': 'chat',
       'gen_ai.request.model': message.modelID || 'unknown',
       'gen_ai.provider.name': message.providerID || 'unknown',
+      'gen_ai.session.id': sessionId,
     });
     hookState?.metrics?.recordMessage({
       'gen_ai.session.id': sessionId,
@@ -644,11 +665,13 @@ async function handleMessageUpdated(
     hookState?.metrics?.recordModelUsage({
       'gen_ai.request.model': message.modelID || 'unknown',
       'gen_ai.provider.name': message.providerID || 'unknown',
+      'gen_ai.session.id': sessionId,
     });
     if (tokens.input || tokens.output) {
       hookState?.metrics?.recordTokenUsage(tokens.input || 0, tokens.output || 0, {
         'gen_ai.request.model': message.modelID || 'unknown',
         'gen_ai.provider.name': message.providerID || 'unknown',
+        'gen_ai.session.id': sessionId,
       });
       if (sessionIDTokenTotalsHas(hookState, sessionId)) {
         const prev = hookState!.sessionTokenTotals.get(sessionId) ?? 0;

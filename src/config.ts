@@ -5,6 +5,7 @@
  */
 
 import type { OtelPluginOptions } from "./types.js";
+import { readFileSync } from "node:fs";
 
 // ─── Default Configuration ────────────────────────────────────────────────────
 
@@ -85,6 +86,31 @@ function parseList(raw: string | undefined): string[] | undefined {
   return items.length > 0 ? items : undefined;
 }
 
+/**
+ * Read an API key from a file. First non-empty line wins; lines shaped like
+ * `KEY=value` contribute only the value (so plain `.env` files work).
+ */
+export function readApiKeyFile(path: string): string {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (error) {
+    throw new Error(
+      `OTel plugin: cannot read apiKeyFile '${path}': ${(error as Error).message}`
+    );
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq > 0 && /^[A-Za-z_][A-Za-z0-9_.]*\s*=/.test(trimmed)) {
+      return trimmed.slice(eq + 1).trim();
+    }
+    return trimmed;
+  }
+  throw new Error(`OTel plugin: apiKeyFile '${path}' contains no key`);
+}
+
 function envConfig(env: NodeJS.ProcessEnv = process.env): Partial<OtelPluginOptions> {
   const out: Partial<OtelPluginOptions> = {};
 
@@ -128,6 +154,9 @@ function envConfig(env: NodeJS.ProcessEnv = process.env): Partial<OtelPluginOpti
   if (spanAttrs) out.spanAttributes = spanAttrs;
 
   if (env.OPENCODE_OTEL_HEADERS_HELPER) out.headersHelper = env.OPENCODE_OTEL_HEADERS_HELPER;
+  if (env.OPENCODE_OTEL_API_KEY) out.apiKey = env.OPENCODE_OTEL_API_KEY;
+  if (env.OPENCODE_OTEL_API_KEY_FILE) out.apiKeyFile = env.OPENCODE_OTEL_API_KEY_FILE;
+  if (env.OPENCODE_OTEL_AUTH_HEADER_NAME) out.authHeaderName = env.OPENCODE_OTEL_AUTH_HEADER_NAME;
   if (env.OPENCODE_TRACEPARENT) out.traceparent = env.OPENCODE_TRACEPARENT;
   if (env.OPENCODE_TRACESTATE) out.tracestate = env.OPENCODE_TRACESTATE;
 
@@ -218,6 +247,19 @@ function mergeConfig(userOptions?: OtelPluginOptions): RequiredConfig {
     ...(options.headers || {}),
   };
 
+  // First-class API key support: apiKey (or apiKeyFile) is sent as authHeaderName.
+  // An explicit `headers[authHeaderName]` always wins.
+  const authHeaderName = pick(options.authHeaderName, envOpts.authHeaderName, "api-key");
+  const apiKeyFile = pick(options.apiKeyFile, envOpts.apiKeyFile, undefined as string | undefined);
+  const apiKey = pick(
+    options.apiKey,
+    envOpts.apiKey,
+    apiKeyFile ? readApiKeyFile(apiKeyFile) : (undefined as string | undefined)
+  );
+  if (apiKey && headers[authHeaderName] === undefined) {
+    headers[authHeaderName] = apiKey;
+  }
+
   const persistence = {
     ...DEFAULT_PERSISTENCE,
     ...(envOpts.persistence || {}),
@@ -264,6 +306,7 @@ function mergeConfig(userOptions?: OtelPluginOptions): RequiredConfig {
     capturePromptInLogs,
     headersHelper,
     headersHelperTimeoutMs,
+    authHeaderName,
     traceparent,
     tracestate,
   } as RequiredConfig;
@@ -348,6 +391,24 @@ function validateConfig(config: RequiredConfig): void {
       if (/[\r\n]/.test(value)) {
         throw new Error(`OTel plugin: header value for '${key}' must not contain CR/LF characters`);
       }
+    }
+  }
+
+  // Validate first-class API key options
+  if (config.apiKey != null) {
+    if (typeof config.apiKey !== "string" || config.apiKey.length === 0) {
+      throw new Error("OTel plugin: apiKey must be a non-empty string");
+    }
+    if (/[\r\n]/.test(config.apiKey)) {
+      throw new Error("OTel plugin: apiKey must not contain CR/LF characters");
+    }
+  }
+  if (config.apiKeyFile != null && (typeof config.apiKeyFile !== "string" || config.apiKeyFile.length === 0)) {
+    throw new Error("OTel plugin: apiKeyFile must be a non-empty string path");
+  }
+  if (config.authHeaderName != null) {
+    if (typeof config.authHeaderName !== "string" || !/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/.test(config.authHeaderName)) {
+      throw new Error("OTel plugin: authHeaderName must be a valid HTTP header name");
     }
   }
 

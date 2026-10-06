@@ -8,6 +8,7 @@ import type { RequiredConfig } from "../config.js";
 import { createMetricsExporter, getMetricsEndpoint } from "./exporter.js";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION, ATTR_DEPLOYMENT_ENVIRONMENT_NAME } from "@opentelemetry/semantic-conventions";
+import { sessionAttributes } from "../utils/session-registry.js";
 
 // ─── Metric Names (official catalog) ──────────────────────────────────────────
 
@@ -101,16 +102,36 @@ export class GenAIMetrics {
   private metricPrefix: string;
   private instruments: Record<string, any> = {};
   private disabledMetrics: Set<string>;
+  private commonAttributes: Record<string, string>;
 
-  constructor(meterProvider: any, options?: { metricPrefix?: string; disabledMetrics?: string[] }) {
+  constructor(meterProvider: any, options?: {
+    metricPrefix?: string;
+    disabledMetrics?: string[];
+    commonAttributes?: Record<string, string>;
+  }) {
     this.meter = meterProvider.getMeter('opencode-otel-plugin');
     this.metricPrefix = options?.metricPrefix ?? '';
     this.disabledMetrics = new Set(options?.disabledMetrics ?? []);
+    this.commonAttributes = options?.commonAttributes ?? {};
     this.initMetrics();
   }
 
   private name(base: string): string {
     return this.metricPrefix ? `${this.metricPrefix}${base}` : base;
+  }
+
+  /**
+   * Enrich every metric datapoint with common attributes (e.g. project.id)
+   * and canonical session.id / session.name when a session id is present.
+   */
+  private attrs(attributes: Record<string, string | number> = {}): Record<string, string | number> {
+    const raw = attributes['gen_ai.session.id'] ?? attributes['session.id'];
+    const sessionId = typeof raw === 'string' ? raw : undefined;
+    return {
+      ...this.commonAttributes,
+      ...attributes,
+      ...sessionAttributes(sessionId),
+    };
   }
 
   private createCounter(base: string, description: string, unit: string): any {
@@ -150,76 +171,78 @@ export class GenAIMetrics {
   }
 
   recordTokenUsage(input: number, output: number, attributes: Record<string, string | number> = {}): void {
-    this.instruments.tokenUsageInput?.add(input, attributes);
-    this.instruments.tokenUsageOutput?.add(output, attributes);
-    this.instruments.tokenUsage?.add(input + output, attributes);
+    const attrs = this.attrs(attributes);
+    this.instruments.tokenUsageInput?.add(input, attrs);
+    this.instruments.tokenUsageOutput?.add(output, attrs);
+    this.instruments.tokenUsage?.add(input + output, attrs);
   }
 
   recordInvocation(attributes: Record<string, string | number> = {}): void {
-    this.instruments.invocationCount?.add(1, attributes);
+    this.instruments.invocationCount?.add(1, this.attrs(attributes));
   }
 
   recordDuration(durationMs: number, attributes: Record<string, string | number> = {}): void {
-    this.instruments.operationDuration?.record(durationMs, attributes);
+    this.instruments.operationDuration?.record(durationMs, this.attrs(attributes));
   }
 
   recordError(attributes: Record<string, string | number> = {}): void {
-    this.instruments.errorCount?.add(1, attributes);
+    this.instruments.errorCount?.add(1, this.attrs(attributes));
   }
 
   // ─── Official catalog methods ──────────────────────────────────────────────
 
   recordSessionCount(attributes: Record<string, string | number> = {}): void {
-    this.instruments.sessionCount?.add(1, attributes);
+    this.instruments.sessionCount?.add(1, this.attrs(attributes));
   }
 
   recordCost(costUsd: number, attributes: Record<string, string | number> = {}): void {
-    if (costUsd > 0) this.instruments.costUsage?.add(costUsd, attributes);
+    if (costUsd > 0) this.instruments.costUsage?.add(costUsd, this.attrs(attributes));
   }
 
   recordLinesOfCode(linesAdded: number, linesRemoved: number, attributes: Record<string, string | number> = {}): void {
     const total = Math.abs(linesAdded) + Math.abs(linesRemoved);
-    this.instruments.linesOfCodeCount?.add(1, { ...attributes, 'file.lines_added': linesAdded, 'file.lines_removed': linesRemoved });
-    this.instruments.linesOfCodeTotal?.add(total, attributes);
+    const attrs = this.attrs(attributes);
+    this.instruments.linesOfCodeCount?.add(1, { ...attrs, 'file.lines_added': linesAdded, 'file.lines_removed': linesRemoved });
+    this.instruments.linesOfCodeTotal?.add(total, attrs);
   }
 
   recordCommit(attributes: Record<string, string | number> = {}): void {
-    this.instruments.commitCount?.add(1, attributes);
+    this.instruments.commitCount?.add(1, this.attrs(attributes));
   }
 
   recordToolDuration(durationMs: number, attributes: Record<string, string | number> = {}): void {
-    this.instruments.toolDuration?.record(durationMs, attributes);
+    this.instruments.toolDuration?.record(durationMs, this.attrs(attributes));
   }
 
   recordCache(hit: boolean, attributes: Record<string, string | number> = {}): void {
-    this.instruments.cacheCount?.add(1, { ...attributes, 'cache.hit': hit });
+    this.instruments.cacheCount?.add(1, { ...this.attrs(attributes), 'cache.hit': hit });
   }
 
   recordSessionDuration(durationMs: number, attributes: Record<string, string | number> = {}): void {
-    this.instruments.sessionDuration?.record(durationMs, attributes);
+    this.instruments.sessionDuration?.record(durationMs, this.attrs(attributes));
   }
 
   recordMessage(attributes: Record<string, string | number> = {}): void {
-    this.instruments.messageCount?.add(1, attributes);
+    this.instruments.messageCount?.add(1, this.attrs(attributes));
   }
 
   recordSessionTokenTotal(totalTokens: number, attributes: Record<string, string | number> = {}): void {
-    this.instruments.sessionTokenTotal?.record(totalTokens, attributes);
+    this.instruments.sessionTokenTotal?.record(totalTokens, this.attrs(attributes));
   }
 
   recordSessionCostTotal(costUsd: number, attributes: Record<string, string | number> = {}): void {
-    this.instruments.sessionCostTotal?.record(costUsd, attributes);
+    this.instruments.sessionCostTotal?.record(costUsd, this.attrs(attributes));
   }
 
   recordModelUsage(attributes: Record<string, string | number> = {}): void {
-    this.instruments.modelUsage?.add(1, attributes);
+    this.instruments.modelUsage?.add(1, this.attrs(attributes));
   }
 
   recordRetry(attributes: Record<string, string | number> = {}): void {
-    this.instruments.retryCount?.add(1, attributes);
+    this.instruments.retryCount?.add(1, this.attrs(attributes));
   }
 
   recordSubtask(attributes: Record<string, string | number> = {}): void {
-    this.instruments.subtaskCount?.add(1, attributes);
+    this.instruments.subtaskCount?.add(1, this.attrs(attributes));
   }
 }

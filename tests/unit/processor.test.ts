@@ -55,6 +55,56 @@ describe("Span Processors", () => {
       await expect(p.shutdown()).resolves.toBeUndefined();
       await expect(p.forceFlush()).resolves.toBeUndefined();
     });
+
+    it("onStart adds session.id / session.name from the registry", async () => {
+      const registry = await import("../../dist/utils/session-registry.js");
+      registry.clearSessionRegistry();
+      registry.rememberSession("ses_x", "Named Session");
+      const span = createMockSpan();
+      span.attributes = { "gen_ai.session.id": "ses_x", "gen_ai.conversation.id": "conv_x" };
+      span.setAttribute = vi.fn((k: string, v: unknown) => {
+        span.attributes[k] = v;
+      });
+      const p = new EnrichmentSpanProcessor(createRedactor(), false);
+      p.onStart(span, {} as any);
+      expect(span.attributes["session.id"]).toBe("ses_x");
+      expect(span.attributes["session.name"]).toBe("Named Session");
+    });
+
+    it("onStart resolves the session through the conversation id", async () => {
+      const registry = await import("../../dist/utils/session-registry.js");
+      registry.clearSessionRegistry();
+      registry.rememberSession("ses_y", "Conv Session", "conv_y");
+      const span = createMockSpan();
+      span.attributes = { "gen_ai.conversation.id": "conv_y" };
+      span.setAttribute = vi.fn((k: string, v: unknown) => {
+        span.attributes[k] = v;
+      });
+      const p = new EnrichmentSpanProcessor(createRedactor(), false);
+      p.onStart(span, {} as any);
+      expect(span.attributes["session.id"]).toBe("ses_y");
+      expect(span.attributes["session.name"]).toBe("Conv Session");
+    });
+
+    it("onEnd backfills session attributes set after span start", async () => {
+      const registry = await import("../../dist/utils/session-registry.js");
+      registry.clearSessionRegistry();
+      registry.rememberSession("ses_z", "Late Session");
+      const span = createMockSpan();
+      span.attributes = { "gen_ai.session.id": "ses_z" };
+      const p = new EnrichmentSpanProcessor(createRedactor(), false);
+      p.onEnd(span as any);
+      expect(span.attributes["session.id"]).toBe("ses_z");
+      expect(span.attributes["session.name"]).toBe("Late Session");
+    });
+
+    it("leaves spans without any session reference untouched", () => {
+      const p = new EnrichmentSpanProcessor(createRedactor(), false);
+      const span = createMockSpan();
+      p.onStart(span, {} as any);
+      expect(span.attributes["session.id"]).toBeUndefined();
+      expect(span.attributes["session.name"]).toBeUndefined();
+    });
   });
 
   describe("PIIRedactionProcessor", () => {

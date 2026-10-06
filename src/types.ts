@@ -76,6 +76,21 @@ export interface OtelPluginOptions {
   /** Headers for OTLP endpoint (auth, etc.) */
   headers?: Record<string, string>;
 
+  /**
+   * API key / token for the OTLP endpoint, sent as `authHeaderName`.
+   * New Relic: sends it as the `api-key` header.
+   */
+  apiKey?: string;
+
+  /**
+   * Path to a file containing the API key. First non-empty line wins;
+   * `KEY=value` style lines use the value part. Used when `apiKey` is not set.
+   */
+  apiKeyFile?: string;
+
+  /** Header name used to send the API key (default "api-key") */
+  authHeaderName?: string;
+
   /** External helper executable that prints refreshed OTLP headers as JSON to stdout */
   headersHelper?: string;
 

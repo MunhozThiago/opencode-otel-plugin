@@ -7,6 +7,7 @@
 import type { Span, SpanContext, Attributes } from "@opentelemetry/api";
 import type { SpanProcessor, ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import type { PIIRedactor } from "../utils/pii.js";
+import { sessionAttributes } from "../utils/session-registry.js";
 
 // ─── Enrichment Span Processor ────────────────────────────────────────────────
 
@@ -36,9 +37,51 @@ export class EnrichmentSpanProcessor implements SpanProcessor {
         }
       }
     }
+    this.applySessionAttributes(span);
+  }
+
+  /** Attach canonical session.id / session.name (registry-backed) to the span. */
+  private applySessionAttributes(span: Span): void {
+    try {
+      const attrs = (span as any).attributes ?? {};
+      const sid =
+        typeof attrs["session.id"] === "string"
+          ? attrs["session.id"]
+          : typeof attrs["gen_ai.session.id"] === "string"
+            ? attrs["gen_ai.session.id"]
+            : undefined;
+      const conversationId =
+        typeof attrs["gen_ai.conversation.id"] === "string"
+          ? attrs["gen_ai.conversation.id"]
+          : undefined;
+      for (const [key, value] of Object.entries(sessionAttributes(sid, conversationId))) {
+        if (attrs[key] === undefined) {
+          (span as any).setAttribute?.(key, value);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
   }
 
   onEnd(span: ReadableSpan): void {
+    // Fallback for spans that gained a session id only after start
+    try {
+      const attrs = (span as any).attributes;
+      if (attrs && attrs["session.id"] === undefined) {
+        const sid =
+          typeof attrs["gen_ai.session.id"] === "string" ? attrs["gen_ai.session.id"] : undefined;
+        const conversationId =
+          typeof attrs["gen_ai.conversation.id"] === "string"
+            ? attrs["gen_ai.conversation.id"]
+            : undefined;
+        for (const [key, value] of Object.entries(sessionAttributes(sid, conversationId))) {
+          if (attrs[key] === undefined) attrs[key] = value;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
     if (this.debug) {
       console.log(`[otel] Span ended: ${span.name}`, {
         traceId: span.spanContext().traceId,
