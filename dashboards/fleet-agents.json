@@ -7,7 +7,62 @@
       "guid": "ODAzNzQ4N3xWSVp8REFTSEJPQVJEfDM0MjA0ODA",
       "name": "My agents",
       "description": null,
-      "widgets": []
+      "widgets": [
+        {
+          "guid": "VIZ_1",
+          "name": "Active Sessions (5m)",
+          "description": "Sessions active in the last 5 minutes",
+          "visualization": {
+            "type": "nrql",
+            "raw": "SELECT count(*) FROM Span WHERE attributes.session.id IS NOT NULL AND timestamp > ago(5m)"
+          }
+        },
+        {
+          "guid": "VIZ_2",
+          "name": "Total Tool Calls",
+          "description": "Number of tool execution spans",
+          "visualization": {
+            "type": "nrql",
+            "raw": "SELECT count(*) FROM Span WHERE name LIKE 'tool.%'"
+          }
+        },
+        {
+          "guid": "VIZ_3",
+          "name": "Sessions per Model",
+          "description": "Breakdown of sessions by model type",
+          "visualization": {
+            "type": "nrql",
+            "raw": "SELECT count(*) FROM Span WHERE attributes.gen_ai.request.model IS NOT NULL FACET attributes.gen_ai.request.model"
+          }
+        },
+        {
+          "guid": "VIZ_4",
+          "name": "Session Success Rate",
+          "description": "Ratio of idle sessions to created sessions",
+          "visualization": {
+            "type": "nrql",
+            "raw": "SELECT (filter(count(*), WHERE name = 'session.idle') / filter(count(*), WHERE name = 'session.created')) * 100 FROM Span"
+          }
+        },
+        {
+          "guid": "VIZ_5",
+          "name": "Sessions Timeline",
+          "description": "Sessions over time (line chart)",
+          "visualization": {
+            "type": "nrql",
+            "raw": "SELECT count(*) FROM Span WHERE name = 'agent.session.primary' TIMESERIES AUTO"
+          }
+        },
+        {
+          "guid": "VIZ_6",
+          "name": "Tool Usage Heatmap",
+          "description": "Tool calls with error breakdown",
+          "visualization": {
+            "type": "nrql",
+            "raw": "SELECT count(*) as calls, count(filter(*, WHERE attributes.tool.error = 1)) as errors, round(count(*)/count(*), 2) as error_rate, attributes.tool.name FROM Span WHERE name = 'tool.execute.after' FACET attributes.tool.name ORDER BY calls DESC LIMIT 20"
+          }
+        }
+      ]
     }
   ],
   "variables": []
