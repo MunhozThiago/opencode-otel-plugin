@@ -2,8 +2,10 @@ node_modules/
 dist/
 coverage/
 .opencode-otel/
+.opencode/
 *.log
 .DS_Store
 .env
 .env.*
+*.env
 *.tsbuildinfo

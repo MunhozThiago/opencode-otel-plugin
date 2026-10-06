@@ -58,11 +58,6 @@ vi.mock("@opentelemetry/api", async () => {
       PRODUCER: 3,
       CONSUMER: 4,
     },
-    SamplingDecision: {
-      DROP: 0,
-      RECORD: 1,
-      RECORD_AND_SAMPLE: 2,
-    },
   };
 });
 

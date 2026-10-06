@@ -42,9 +42,9 @@ declare module '@opentelemetry/api' {
   }
 
   export enum SamplingDecision {
-    DROP = 0,
+    NOT_RECORD = 0,
     RECORD = 1,
-    RECORD_AND_SAMPLE = 2,
+    RECORD_AND_SAMPLED = 2,
   }
 
   export enum SpanKind {

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { context } from "@opentelemetry/api";
+import { context, SamplingDecision } from "@opentelemetry/api";
 
 // Real OTel Context has instance methods; keep mockContext bag-aware via symbol key
 vi.mock("@opentelemetry/api", async () => {
@@ -29,11 +29,6 @@ vi.mock("@opentelemetry/api", async () => {
       setSpan: vi.fn((ctx, span) => ctx),
     },
     ROOT_CONTEXT: actual.ROOT_CONTEXT,
-    SamplingDecision: {
-      DROP: 0,
-      RECORD: 1,
-      RECORD_AND_SAMPLE: 2,
-    },
     SamplingResult: {},
     Sampler: {},
     SpanKind: {
@@ -47,12 +42,6 @@ vi.mock("@opentelemetry/api", async () => {
     Context: {},
   };
 });
-
-const SamplingDecision = {
-  DROP: 0,
-  RECORD: 1,
-  RECORD_AND_SAMPLE: 2,
-};
 
 describe("ConversationAwareSampler", () => {
   let sampler: any;
@@ -79,7 +68,18 @@ describe("ConversationAwareSampler", () => {
         {},
         []
       );
-      expect(result.decision).toBe(SamplingDecision.RECORD_AND_SAMPLE);
+      expect(result.decision).toBe(SamplingDecision.RECORD_AND_SAMPLED);
+    });
+
+    it("should return a decision the real OTel SDK can consume", async () => {
+      const samplerModule = await import("../../dist/otel/sampler.js");
+      const samplerInstance = new samplerModule.ConversationAwareSampler(1.0, true);
+      const result = samplerInstance.shouldSample(mockContext, "trace-id", "span-name", 0, {}, []);
+      expect(result.decision).not.toBeUndefined();
+      expect(result.decision).toBe(SamplingDecision.RECORD_AND_SAMPLED);
+      expect(SamplingDecision.NOT_RECORD).toBe(0);
+      expect(SamplingDecision.RECORD_AND_SAMPLED).toBe(2);
+      expect(Object.keys(SamplingDecision)).not.toContain("RECORD_AND_SAMPLE");
     });
 
     it("should never sample when rate is 0", async () => {
@@ -94,7 +94,7 @@ describe("ConversationAwareSampler", () => {
         {},
         []
       );
-      expect(result.decision).toBe(SamplingDecision.DROP);
+      expect(result.decision).toBe(SamplingDecision.NOT_RECORD);
     });
 
     it("should cache conversation decisions", async () => {
@@ -155,7 +155,7 @@ describe("ConversationAwareSampler", () => {
       const samplerModule = await import("../../dist/otel/sampler.js");
       const sampler = new samplerModule.ConversationAwareSampler(1.0, true);
       
-      sampler.setConversationDecision("conv-manual", { decision: 2 }); // RECORD_AND_SAMPLE
+      sampler.setConversationDecision("conv-manual", { decision: SamplingDecision.RECORD_AND_SAMPLED });
       expect(sampler.getConversationDecision("conv-manual")).toBeDefined();
       
       sampler.clearConversationDecision("conv-manual");
@@ -165,7 +165,7 @@ describe("ConversationAwareSampler", () => {
 });
 
 describe("AlwaysSampleSampler", () => {
-  it("should always return RECORD_AND_SAMPLE", async () => {
+  it("should always return RECORD_AND_SAMPLED", async () => {
     const samplerModule = await import("../../dist/otel/sampler.js");
     const sampler = new samplerModule.AlwaysSampleSampler();
     const result = sampler.shouldSample(
@@ -176,12 +176,12 @@ describe("AlwaysSampleSampler", () => {
       {},
       []
     );
-    expect(result.decision).toBe(2); // RECORD_AND_SAMPLE
+    expect(result.decision).toBe(SamplingDecision.RECORD_AND_SAMPLED);
   });
 });
 
 describe("NeverSampleSampler", () => {
-  it("should always return DROP", async () => {
+  it("should always return NOT_RECORD", async () => {
     const samplerModule = await import("../../dist/otel/sampler.js");
     const sampler = new samplerModule.NeverSampleSampler();
     const result = sampler.shouldSample(
@@ -192,7 +192,7 @@ describe("NeverSampleSampler", () => {
       {},
       []
     );
-    expect(result.decision).toBe(0); // DROP
+    expect(result.decision).toBe(SamplingDecision.NOT_RECORD);
   });
 });
 

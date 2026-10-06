@@ -52,7 +52,7 @@ export class ConversationAwareSampler implements ConversationSampler {
     const decision = this.makeDecision();
     const result: api.SamplingResult = {
       decision,
-      attributes: decision === api.SamplingDecision.RECORD_AND_SAMPLE ? attributes : undefined,
+      attributes: decision === api.SamplingDecision.RECORD_AND_SAMPLED ? attributes : undefined,
     };
 
     // Cache the decision
@@ -142,9 +142,9 @@ export class ConversationAwareSampler implements ConversationSampler {
   }
 
   private makeDecision(): api.SamplingDecision {
-    if (this.rate >= 1.0) return api.SamplingDecision.RECORD_AND_SAMPLE;
-    if (this.rate <= 0) return api.SamplingDecision.DROP;
-    return Math.random() < this.rate ? api.SamplingDecision.RECORD_AND_SAMPLE : api.SamplingDecision.DROP;
+    if (this.rate >= 1.0) return api.SamplingDecision.RECORD_AND_SAMPLED;
+    if (this.rate <= 0) return api.SamplingDecision.NOT_RECORD;
+    return Math.random() < this.rate ? api.SamplingDecision.RECORD_AND_SAMPLED : api.SamplingDecision.NOT_RECORD;
   }
 
   private makeRateBasedResult(): api.SamplingResult {
@@ -186,12 +186,12 @@ class ParentBasedSampler implements api.Sampler {
 
     // If parent is sampled, sample this span
     if (parentSpanContext && (parentSpanContext.traceFlags & 1)) {
-      return { decision: api.SamplingDecision.RECORD_AND_SAMPLE };
+      return { decision: api.SamplingDecision.RECORD_AND_SAMPLED };
     }
 
     // If parent is not sampled, don't sample
     if (parentSpanContext) {
-      return { decision: api.SamplingDecision.DROP };
+      return { decision: api.SamplingDecision.NOT_RECORD };
     }
 
     // No parent - use rate-based sampling
@@ -199,10 +199,10 @@ class ParentBasedSampler implements api.Sampler {
   }
 
   private rateBasedSample(): api.SamplingResult {
-    if (this.rate >= 1.0) return { decision: api.SamplingDecision.RECORD_AND_SAMPLE };
-    if (this.rate <= 0) return { decision: api.SamplingDecision.DROP };
+    if (this.rate >= 1.0) return { decision: api.SamplingDecision.RECORD_AND_SAMPLED };
+    if (this.rate <= 0) return { decision: api.SamplingDecision.NOT_RECORD };
     return {
-      decision: Math.random() < this.rate ? api.SamplingDecision.RECORD_AND_SAMPLE : api.SamplingDecision.DROP,
+      decision: Math.random() < this.rate ? api.SamplingDecision.RECORD_AND_SAMPLED : api.SamplingDecision.NOT_RECORD,
     };
   }
 }
@@ -211,7 +211,7 @@ class ParentBasedSampler implements api.Sampler {
 
 export class AlwaysSampleSampler implements api.Sampler {
   shouldSample(): api.SamplingResult {
-    return { decision: api.SamplingDecision.RECORD_AND_SAMPLE };
+    return { decision: api.SamplingDecision.RECORD_AND_SAMPLED };
   }
 }
 
@@ -219,7 +219,7 @@ export class AlwaysSampleSampler implements api.Sampler {
 
 export class NeverSampleSampler implements api.Sampler {
   shouldSample(): api.SamplingResult {
-    return { decision: api.SamplingDecision.DROP };
+    return { decision: api.SamplingDecision.NOT_RECORD };
   }
 }
 
