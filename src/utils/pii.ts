@@ -10,12 +10,12 @@ import type { Attributes, RedactionRule, PIIConfig } from "../types.js";
 
 const DEFAULT_PATTERNS: RedactionRule[] = [
   // API Keys (various formats)
-  { pattern: /\b(?:api[_-]?key|apikey)['"]?\s*[:=]\s*['"]?([a-zA-Z0-9_\-]{20,})['"]?/gi, replacement: '[REDACTED_API_KEY]' },
+  { pattern: /\b(?:api[_-]?key|apikey)['"]?\s*[:=]\s*['"]?([a-zA-Z0-9_-]{20,})['"]?/gi, replacement: '[REDACTED_API_KEY]' },
   { pattern: /\b(?:api[_-]?key|apikey)['"]?\s*[:=]\s*['"]([^'"]{20,})['"]/gi, replacement: '[REDACTED_API_KEY]' },
   
   // Bearer tokens (Authorization: Bearer <token>)
-  { pattern: /\b(?:authorization:\s*)?(?:bearer|token)\s+([a-zA-Z0-9_\-\.]{20,})/gi, replacement: '[REDACTED_TOKEN]' },
-  { pattern: /\b(?:bearer|token)['"]?\s*[:=]\s*['"]?([a-zA-Z0-9_\-\.]{20,})['"]?/gi, replacement: '[REDACTED_TOKEN]' },
+  { pattern: /\b(?:authorization:\s*)?(?:bearer|token)\s+([a-zA-Z0-9_.-]{20,})/gi, replacement: '[REDACTED_TOKEN]' },
+  { pattern: /\b(?:bearer|token)['"]?\s*[:=]\s*['"]?([a-zA-Z0-9_.-]{20,})['"]?/gi, replacement: '[REDACTED_TOKEN]' },
   
   // AWS keys
   { pattern: /\bAKIA[0-9A-Z]{16}\b/g, replacement: '[REDACTED_AWS_KEY]' },

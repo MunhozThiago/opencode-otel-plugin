@@ -119,7 +119,7 @@ export class AgentLogger {
 
   emitEvent(eventName: string | undefined, message: string, severity: number, severityText: string, attributes: AgentLogAttributes = {}): void {
     if (!this.logsEnabled) return;
-    let finalAttrs: AgentLogAttributes = { ...attributes };
+    const finalAttrs: AgentLogAttributes = { ...attributes };
     if (eventName) {
       finalAttrs['event.name'] = eventName;
     }

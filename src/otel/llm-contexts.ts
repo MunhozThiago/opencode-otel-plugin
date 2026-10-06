@@ -20,6 +20,7 @@ const llmRequestContexts = new Map<string, LlmRequestContext>();
 
 /** Providers allowed to receive W3C traceparent/baggage injection (allowlist; empty = all). */
 const DEFAULT_PROVIDER_ALLOWLIST: string[] = [
+  "opencode",
   "openai",
   "anthropic",
   "google",

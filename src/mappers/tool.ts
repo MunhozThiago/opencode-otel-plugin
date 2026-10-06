@@ -11,6 +11,7 @@ import type { GenAIAttributes, ConversationContext } from "../types.js";
 import { createBaseAttributes, addToolAttributes, flattenAttributes, addOpenInferenceAttributes } from "../otel/semantic-conventions.js";
 import { getConversationContext, generateConversationId } from "../utils/ids.js";
 import { enrichSpanAttributes } from "../otel/provider.js";
+import { resolveEventPayload } from "./validation.js";
 
 // ─── Tool Execute Before ──────────────────────────────────────────────────────
 
@@ -111,11 +112,16 @@ export function mapPermissionAsk(
   piiRedactor: any,
   activeSpans: Map<string, Span>
 ): Span | null {
-  const permission = (event as any).input;
+  // Hook path passes the Permission as `input`; the `permission.updated` event
+  // carries it flat under `properties` (no `info`, and `callID` is optional).
+  const permission =
+    (event as any).input ??
+    resolveEventPayload(event) ??
+    ((event as any)?.sessionID ? event : (event as any)?.properties);
   if (!permission) return null;
 
-  const { sessionID, callID, title, metadata } = permission;
-  if (!sessionID || !callID) return null;
+  const { sessionID, title } = permission;
+  if (!sessionID) return null;
 
   const conversationId = generateConversationId(sessionID);
   const convCtx = getConversationContext(conversationId);
@@ -150,7 +156,10 @@ export function mapPermissionReplied(
   piiRedactor: any,
   activeSpans: Map<string, Span>
 ): Span | null {
-  const { sessionID, permissionID, response } = (event as any).input || {};
+  // Real `permission.replied` is flat: { sessionID, permissionID, response }.
+  const payload =
+    (event as any).input ?? resolveEventPayload(event) ?? (event as any).properties;
+  const { sessionID, permissionID, response } = payload ?? {};
   if (!sessionID || !permissionID) return null;
 
   const conversationId = generateConversationId(sessionID);

@@ -741,6 +741,74 @@ describe("Real SDK Shapes", () => {
     });
   });
 
+  describe("permission.updated / permission.replied (flat Permission payload)", () => {
+    it("maps permission.updated without a callID", async () => {
+      const { mapPermissionAsk } = await import("../../src/mappers/tool.js");
+      const { getOrCreateConversationContext } = await import("../../src/utils/ids.js");
+      getOrCreateConversationContext(CONV_ID, SESSION_ID, "agent_test", "primary");
+
+      const tracer = createMockTracer();
+      const piiRedactor = createMockPiiRedactor();
+      const activeSpans = new Map();
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = mapPermissionAsk(
+        {
+          type: "permission.updated",
+          properties: {
+            id: "perm-1",
+            type: "edit",
+            sessionID: SESSION_ID,
+            messageID: "msg-1",
+            title: "Edit file",
+            pattern: "*.ts",
+            metadata: {},
+            time: { created: 1 },
+          },
+        },
+        tracer as any,
+        piiRedactor,
+        activeSpans
+      );
+
+      expect(result).not.toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+      expect(tracer.startSpan).toHaveBeenCalledWith(
+        "permission.Edit file",
+        expect.objectContaining({ kind: SpanKind.INTERNAL })
+      );
+      expect((result as any)._attrs["permission.id"]).toBe("perm-1");
+      expect((result as any)._attrs["permission.type"]).toBe("edit");
+      warn.mockRestore();
+    });
+
+    it("adds an event to the active tool span on permission.replied", async () => {
+      const { mapPermissionReplied } = await import("../../src/mappers/tool.js");
+      const tracer = createMockTracer();
+      const piiRedactor = createMockPiiRedactor();
+      const activeSpans = new Map();
+      const toolSpan = createMockSpan();
+      activeSpans.set(`${CONV_ID}:tool:call-1`, toolSpan);
+
+      const result = mapPermissionReplied(
+        {
+          type: "permission.replied",
+          properties: { sessionID: SESSION_ID, permissionID: "perm-1", response: "allow" },
+        },
+        tracer as any,
+        piiRedactor,
+        activeSpans
+      );
+
+      expect(result).toBeNull();
+      expect(toolSpan.addEvent).toHaveBeenCalledWith("permission.replied", {
+        permission_id: "perm-1",
+        response: "allow",
+      });
+    });
+  });
+
   describe("validateEventShape / resolveEventPayload", () => {
     it("accepts events without an `info` object", async () => {
       const { validateEventShape, resolveEventPayload } = await import(

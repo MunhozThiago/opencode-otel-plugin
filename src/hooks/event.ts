@@ -31,7 +31,7 @@ import { generateConversationId, getConversationContext, getOrCreateConversation
 import type { GenAIMetrics } from "../otel/metrics.js";
 import type { AgentLogger } from "../otel/logs.js";
 import { resolveEventPayload } from "../mappers/validation.js";
-import { setBoundedMap, sweepMap, MAX_PENDING } from "../utils/bounded.js";
+import { setBoundedMap, MAX_PENDING } from "../utils/bounded.js";
 import { setLlmRequestContext } from "../otel/llm-contexts.js";
 
 // ─── Hook State ────────────────────────────────────────────────────────────────
@@ -233,7 +233,10 @@ export async function handleEvent(input: { event: any }): Promise<void> {
         break;
 
       // Permission events
+      // (`permission.ask` is the hook-shaped name; opencode emits
+      //  `permission.updated` with the flat Permission payload)
       case 'permission.ask':
+      case 'permission.updated':
         toolMapper.permissionAsk(event, tracer, piiRedactor, activeSpans);
         hookState?.logs?.toolDecision('permission pending', {
           operation: 'permission',
@@ -245,7 +248,12 @@ export async function handleEvent(input: { event: any }): Promise<void> {
         hookState?.logs?.toolDecision('permission replied', {
           operation: 'permission',
           sessionId: (event as any).properties?.sessionID ?? (event as any).properties?.info?.sessionID,
-          decision: String((event as any).properties?.reply?.decision ?? (event as any).properties?.reply ?? ''),
+          decision: String(
+            (event as any).properties?.response ??
+            (event as any).properties?.reply?.decision ??
+            (event as any).properties?.reply ??
+            ''
+          ),
         });
         break;
 
@@ -362,7 +370,9 @@ export async function handleEvent(input: { event: any }): Promise<void> {
         break;
 
       default:
-        if (debug) {
+        // High-frequency / informational events we intentionally don't map —
+        // don't flood the debug log with them.
+        if (debug && !IGNORED_EVENT_TYPES.has(event.type)) {
           console.log(`[otel] Unhandled event type: ${event.type}`);
         }
     }
@@ -407,6 +417,18 @@ export async function handleEvent(input: { event: any }): Promise<void> {
 
 // ─── Metrics/Logs Helpers ─────────────────────────────────────────────────────
 
+/** Event types we knowingly skip — logged only at debug, so keep them out of the log. */
+const IGNORED_EVENT_TYPES = new Set([
+  'message.part.delta',
+  'plugin.added',
+  'session.diff',
+  'file.watcher.updated',
+  'catalog.updated',
+  'integration.updated',
+  'reference.updated',
+  'vcs.branch.updated',
+]);
+
 const METRIC_EVENTS = new Set([
   'session.created',
   'session.deleted',
@@ -416,8 +438,11 @@ const METRIC_EVENTS = new Set([
   'tool.execute.before',
   'tool.execute.after',
   'permission.ask',
+  'permission.updated',
+  'permission.replied',
   'command.executed',
   'file.edited',
+  'todo.updated',
   'mcp.tool.call',
   'mcp.tool.result',
   'mcp.tool.error',

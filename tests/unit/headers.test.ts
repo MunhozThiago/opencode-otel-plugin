@@ -10,6 +10,21 @@ import {
   isAuthFailure,
   DynamicHeaders,
 } from "../../dist/otel/headers.js";
+import { isProviderAllowed } from "../../dist/otel/llm-contexts.js";
+
+describe("provider allowlist (chat.headers)", () => {
+  it("allows the opencode provider this install actually uses", () => {
+    expect(isProviderAllowed("opencode")).toBe(true);
+    expect(isProviderAllowed("OPencode")).toBe(true);
+  });
+
+  it("still allows known LLM providers and unknown/undefined ids", () => {
+    expect(isProviderAllowed("openai")).toBe(true);
+    expect(isProviderAllowed("anthropic")).toBe(true);
+    expect(isProviderAllowed(undefined)).toBe(true);
+    expect(isProviderAllowed("unknown-provider")).toBe(false);
+  });
+});
 
 describe("Dynamic Headers", () => {
   describe("parseOtlpHeaders", () => {
