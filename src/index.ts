@@ -28,7 +28,6 @@ interface PluginState {
 }
 
 let pluginState: PluginState | null = null;
-let signalHandlersInstalled = false;
 
 // ─── Safe Hook Wrapper ─────────────────────────────────────────────────────────
 
@@ -42,32 +41,6 @@ function safeHook<Fn extends (...args: any[]) => any>(fn: Fn, name: string): Fn 
       return undefined;
     }
   }) as any;
-}
-
-// ─── Signal Handlers (SIGTERM/SIGINT/beforeExit) ───────────────────────────────
-
-function installSignalHandlers(): void {
-  if (signalHandlersInstalled) return;
-  signalHandlersInstalled = true;
-
-  const onSignal = (signal: string) => {
-    if (!pluginState || pluginState.isShuttingDown) return;
-    console.log(`[otel] Received ${signal}, shutting down...`);
-    void shutdown().finally(() => {
-      // Allow default behavior after flush
-      if (signal === 'SIGINT' || signal === 'SIGTERM') {
-        process.exit(0);
-      }
-    });
-  };
-
-  process.on('SIGTERM', () => onSignal('SIGTERM'));
-  process.on('SIGINT', () => onSignal('SIGINT'));
-  process.on('beforeExit', () => {
-    if (pluginState && !pluginState.isShuttingDown) {
-      void shutdown();
-    }
-  });
 }
 
 // ─── Main Plugin Factory ───────────────────────────────────────────────────────
@@ -142,9 +115,6 @@ const plugin: Plugin = async (
   initializeChatHooks(config, activeSpans);
   initializeToolHooks(config, tracer, piiRedactor, activeSpans);
   initializeSessionHooks(config, tracer, piiRedactor, activeSpans);
-
-  // 6b. Install process signal handlers
-  installSignalHandlers();
 
   // 7. Return hooks (all wrapped in safe() to isolate host from telemetry failures)
   const hooks: Hooks = {
